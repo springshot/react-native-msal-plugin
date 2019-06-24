@@ -4,6 +4,7 @@ package com.reactlibrary;
 import android.app.Activity;
 import android.content.Intent;
 
+import com.facebook.react.bridge.BaseActivityEventListener;
 import com.facebook.react.bridge.ActivityEventListener;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -23,14 +24,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-public class RNMsalPlugin extends ReactContextBaseJavaModule implements ActivityEventListener {
+public class RNMsalPlugin extends ReactContextBaseJavaModule {
     private static PublicClientApplication _publicClientApplication;
 
     private static Map<String,PublicClientApplication> _publicClientApplications = new HashMap<>();
 
     public RNMsalPlugin(ReactApplicationContext reactContext) {
         super(reactContext);
-        reactContext.addActivityEventListener(this);
     }
 
     @Override
@@ -38,23 +38,34 @@ public class RNMsalPlugin extends ReactContextBaseJavaModule implements Activity
         return "RNMsalPlugin";
     }
 
-    @Override
-    public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
-        _publicClientApplication.handleInteractiveRequestRedirect(requestCode, resultCode, data);
+    private final ActivityEventListener activityEventListener = new BaseActivityEventListener() {
+        @Override
+        public void onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+            super.onActivityResult(activity, requestCode, resultCode, data);
+            _publicClientApplication.handleInteractiveRequestRedirect(requestCode, resultCode, data);
+        }
+    };
+
+    private void removeActivityEventListener(){
+        this.getReactApplicationContext().removeActivityEventListener(activityEventListener);
     }
 
-    @Override
-    public void onNewIntent(Intent intent) {
-
+    private void addActivityEventListener(){
+        this.getReactApplicationContext().addActivityEventListener(activityEventListener);
     }
 
     @ReactMethod
     public void acquireTokenAsync(String authority, String clientId, String scopes, String extraParameters, final Promise promise) {
         try {
 
-            getOrCreatePublicationClient(clientId, authority).acquireToken(this.getCurrentActivity(), scopes.split(","), "", null, extraParameters, handleResult(promise, authority));
+            PublicClientApplication publicClientApplication = getOrCreatePublicationClient(clientId, authority);
+
+            addActivityEventListener();
+
+            publicClientApplication.acquireToken(this.getCurrentActivity(), scopes.split(","), "", null, extraParameters, handleResult(promise, authority));
 
         } catch (Exception ex) {
+            removeActivityEventListener();
             promise.reject(ex);
         }
     }
@@ -67,9 +78,12 @@ public class RNMsalPlugin extends ReactContextBaseJavaModule implements Activity
 
             User user = publicClientApplication.getUser(userIdentifier);
 
+            addActivityEventListener();
+
             publicClientApplication.acquireTokenSilentAsync(scopes.split(","), user, handleResult(promise, authority));
 
         } catch (Exception ex) {
+            removeActivityEventListener();
             promise.reject(ex);
         }
     }
@@ -94,16 +108,19 @@ public class RNMsalPlugin extends ReactContextBaseJavaModule implements Activity
        return new AuthenticationCallback() {
             @Override
             public void onSuccess(AuthenticationResult authenticationResult) {
+                removeActivityEventListener();
                 promise.resolve(msalResultToDictionary(authenticationResult, authority));
             }
 
             @Override
             public void onError(MsalException exception) {
+                removeActivityEventListener();
                 promise.reject(exception);
             }
 
             @Override
             public void onCancel() {
+                removeActivityEventListener();
                 promise.reject("userCancel", "userCancel");
             }
         };
